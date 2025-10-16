@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Скачать видео с YouTube</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <style>
+        body {
+            font-family: "Segoe UI", Arial, sans-serif;
+            background: #f5f7fa;
+            padding: 40px;
+            text-align: center;
+        }
+
+        input, select, button {
+            font-size: 16px;
+            padding: 10px 14px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            margin: 5px;
+        }
+
+        button {
+            background-color: #2196f3;
+            color: white;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #1976d2;
+        }
+
+        #progress-wrapper {
+            margin: 20px auto;
+            width: 60%;
+            max-width: 600px;
+            height: 35px;
+            background: #eee;
+            border-radius: 20px;
+            overflow: hidden;
+            display: none;
+        }
+
+        #progress-bar {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #4caf50, #81c784);
+            text-align: center;
+            color: white;
+            font-weight: bold;
+            line-height: 35px;
+            transition: width 0.3s;
+        }
+
+        .error { color: red; }
+        .success { color: green; }
+    </style>
+</head>
+<body>
+
+    <h1>🎬 Скачать видео с YouTube</h1>
+
+    <input type="text" id="url" placeholder="Вставьте ссылку на YouTube" style="width:60%;">
+    <button id="get-formats">Показать доступные форматы</button>
+
+    <div id="format-section" style="display:none;">
+        <select id="format"></select>
+        <button id="download-btn">Скачать выбранный формат</button>
+    </div>
+
+    <div id="progress-wrapper">
+        <div id="progress-bar">0%</div>
+    </div>
+
+    <div id="status-text"></div>
+
+    <script>
+        const csrf = '{{ csrf_token }}';
+        const getFormatsBtn = document.getElementById('get-formats');
+        const formatSection = document.getElementById('format-section');
+        const formatSelect = document.getElementById('format');
+        const downloadBtn = document.getElementById('download-btn');
+        const progressBar = document.getElementById('progress-bar');
+        const progressWrapper = document.getElementById('progress-wrapper');
+        const statusText = document.getElementById('status-text');
+
+        getFormatsBtn.addEventListener('click', async () => {
+            const url = document.getElementById('url').value.trim();
+            if (!url) return alert('Введите ссылку на видео!');
+            statusText.textContent = '🔍 Получаем список форматов...';
+            formatSelect.innerHTML = '';
+            formatSection.style.display = 'none';
+
+            const res = await fetch(`/formats/?url=${encodeURIComponent(url)}`);
+            const data = await res.json();
+
+            if (data.error) {
+                statusText.textContent = '❌ ' + data.error;
+                statusText.classList.add('error');
+                return;
+            }
+
+            if (!data.formats || data.formats.length === 0) {
+                statusText.textContent = '⚠️ Не удалось найти форматы.';
+                return;
+            }
+
+            data.formats.forEach(f => {
+                const size = f.filesize ? (f.filesize / 1024 / 1024).toFixed(1) + ' МБ' : '—';
+                const opt = document.createElement('option');
+                opt.value = f.format_id;
+                opt.textContent = `${f.resolution} (${f.ext}, ${size})`;
+                formatSelect.appendChild(opt);
+            });
+
+            formatSection.style.display = 'block';
+            statusText.textContent = '✅ Форматы загружены.';
+            statusText.classList.add('success');
+        });
+
+        downloadBtn.addEventListener('click', async () => {
+            const url = document.getElementById('url').value.trim();
+            const format_id = formatSelect.value;
+            if (!url || !format_id) return alert('Выберите формат.');
+
+            progressWrapper.style.display = 'block';
+            progressBar.style.width = '0%';
+            progressBar.textContent = '0%';
+            statusText.textContent = '⬇️ Загрузка началась...';
+            statusText.classList.remove('error', 'success');
+
+            const formData = new FormData();
+            formData.append('url', url);
+            formData.append('format_id', format_id);
+            formData.append('csrfmiddlewaretoken', csrf);
+
+            const res = await fetch("", { method: "POST", body: formData });
+            const data = await res.json();
+
+            if (data.error) {
+                statusText.textContent = '❌ ' + data.error;
+                statusText.classList.add('error');
+                return;
+            }
+
+            const taskId = data.task_id;
+
+            const interval = setInterval(async () => {
+                const res = await fetch(`/progress/${taskId}/`);
+                const progress = await res.json();
+
+                if (progress.progress === 'error') {
+                    clearInterval(interval);
+                    statusText.textContent = '❌ Ошибка: ' + (progress.message || '');
+                    statusText.classList.add('error');
+                    return;
+                }
+
+                const pct = parseFloat(progress.progress) || 0;
+                progressBar.style.width = pct + '%';
+                progressBar.textContent = Math.round(pct) + '%';
+                statusText.textContent = `⬇️ Загрузка: ${Math.round(pct)}%`;
+
+                if (pct >= 100) {
+                    clearInterval(interval);
+                    statusText.textContent = '✅ Загрузка завершена! Подготовка файла...';
+                    setTimeout(() => {
+                        window.location.href = `/download/${taskId}/`;
+                    }, 1500);
+                }
+            }, 1500);
+        });
+    </script>
+
+</body>
+</html>
